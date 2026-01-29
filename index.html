@@ -6,24 +6,48 @@
     <title>Wasatch Pro Forecast</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --bg: #0b1120; --card: #1e293b; --accent: #0ea5e9; --text: #f8fafc; --sub: #94a3b8; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px; }
-        .card { background: var(--card); border-radius: 16px; padding: 20px; border: 1px solid #334155; }
-        .header { display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 15px; }
-        .resort-name { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-        .stat-item { background: #0f172a; padding: 10px; border-radius: 8px; text-align: center; }
-        .label { display: block; font-size: 0.65rem; color: var(--sub); text-transform: uppercase; }
-        .val { font-size: 1rem; font-weight: 700; }
-        .badge { font-size: 0.65rem; padding: 3px 8px; border-radius: 4px; font-weight: 800; margin-left: 5px; }
-        .warning { background: #991b1b; color: #fef2f2; }
-        canvas { background: #0f172a; border-radius: 8px; padding: 10px; margin-top: 10px; }
+        :root { --bg: #0b1120; --card: #1e293b; --accent: #0ea5e9; --text: #f8fafc; --sub: #94a3b8; --warning: #f87171; }
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; max-width: 1000px; margin: 0 auto; }
+        
+        .controls { display: flex; justify-content: center; margin-bottom: 30px; gap: 15px; align-items: center; }
+        select { background: var(--card); color: var(--text); border: 2px solid var(--accent); padding: 10px 20px; border-radius: 12px; font-size: 1rem; cursor: pointer; outline: none; }
+        
+        .grid { display: grid; grid-template-columns: 1fr; gap: 25px; }
+        .card { background: var(--card); border-radius: 20px; padding: 25px; border: 1px solid #334155; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); animation: fadeIn 0.4s ease-out; }
+        
+        .header { display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 15px; margin-bottom: 20px; align-items: center; }
+        .resort-name { font-size: 1.8rem; font-weight: 800; color: var(--accent); letter-spacing: -0.5px; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
+        .stat-item { background: #0f172a; padding: 15px; border-radius: 12px; text-align: center; border: 1px solid #1e293b; }
+        .label { display: block; font-size: 0.7rem; color: var(--sub); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+        .val { font-size: 1.2rem; font-weight: 700; }
+        
+        .badge { font-size: 0.75rem; padding: 5px 12px; border-radius: 6px; font-weight: 800; text-transform: uppercase; }
+        .badge-warning { background: rgba(239, 68, 68, 0.2); color: var(--warning); border: 1px solid #ef4444; }
+        .badge-powder { background: rgba(14, 165, 233, 0.2); color: var(--accent); border: 1px solid var(--accent); }
+        
+        .chart-container { background: #0f172a; border-radius: 12px; padding: 15px; margin-top: 10px; height: 300px; position: relative; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
-    <h1 style="text-align:center; margin-bottom:30px;">🏔️ WASATCH PRO v2.1</h1>
-    <div id="grid" class="grid">Syncing with Wasatch weather stations...</div>
+
+    <h1 style="text-align:center; font-weight:900; letter-spacing:-2px; margin-bottom:10px;">WASATCH PRO <span style="color:var(--accent)">FORECAST</span></h1>
+    
+    <div class="controls">
+        <select id="resort-select" onchange="updateView()">
+            <option value="all">All Mountains</option>
+            <option value="Alta">Alta</option>
+            <option value="Snowbird">Snowbird</option>
+            <option value="Brighton">Brighton</option>
+            <option value="Solitude">Solitude</option>
+            <option value="Deer Valley">Deer Valley</option>
+        </select>
+    </div>
+
+    <div id="grid" class="grid"></div>
 
     <script>
         const resorts = [
@@ -34,72 +58,98 @@
             { name: "Deer Valley", lat: 40.6368, lon: -111.4783 }
         ];
 
-        async function init() {
+        // Load saved preference from localStorage
+        const savedPref = localStorage.getItem('preferredResort') || 'all';
+        document.getElementById('resort-select').value = savedPref;
+
+        async function updateView() {
+            const selection = document.getElementById('resort-select').value;
+            localStorage.setItem('preferredResort', selection);
             const grid = document.getElementById('grid');
+            
+            const filteredResorts = selection === 'all' ? resorts : resorts.filter(r => r.name === selection);
             grid.innerHTML = '';
 
-            for (const r of resorts) {
-                const url = `https://api.open-meteo.com/v1/forecast?latitude=${r.lat}&longitude=${r.lon}&hourly=temperature_2m,relative_humidity_2m,cloud_cover,snowfall,visibility,wind_speed_10m,wind_gusts_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&visibility_unit=miles&timezone=auto&forecast_days=1`;
-                const res = await fetch(url);
-                const data = await res.json();
-                const h = data.hourly;
-                const now = new Date().getHours();
+            for (const r of filteredResorts) {
+                try {
+                    const url = `https://api.open-meteo.com/v1/forecast?latitude=${r.lat}&longitude=${r.lon}&hourly=temperature_2m,relative_humidity_2m,cloud_cover,snowfall,visibility,wind_speed_10m,wind_gusts_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&visibility_unit=miles&timezone=auto&forecast_days=1`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    const h = data.hourly;
+                    const now = new Date().getHours();
 
-                const visValue = h.visibility[now];
-                const cloudValue = h.cloud_cover[now];
-                const isFlatLight = visValue < 4 || cloudValue > 85;
+                    // Visibility Fix: Convert meters to miles if necessary and cap at 10
+                    let rawVis = h.visibility[now];
+                    let visInMiles = rawVis > 500 ? (rawVis / 1609.34) : rawVis;
+                    const visDisplay = Math.min(visInMiles, 10).toFixed(1);
 
-                const card = document.createElement('div');
-                card.className = 'card';
-                card.innerHTML = `
-                    <div class="header">
-                        <span class="resort-name">${r.name}</span>
-                        <div>${isFlatLight ? '<span class="badge warning">FLAT LIGHT RISK</span>' : ''}</div>
-                    </div>
-                    <div class="stats-grid">
-                        <div class="stat-item"><span class="label">Temp</span><span class="val">${Math.round(h.temperature_2m[now])}°F</span></div>
-                        <div class="stat-item"><span class="label">Wind</span><span class="val">${Math.round(h.wind_speed_10m[now])} mph</span></div>
-                        <div class="stat-item"><span class="label">Visibility</span><span class="val">${visValue.toFixed(1)} mi</span></div>
-                        <div class="stat-item"><span class="label">Humidity</span><span class="val">${h.relative_humidity_2m[now]}%</span></div>
-                        <div class="stat-item"><span class="label">Clouds</span><span class="val">${cloudValue}%</span></div>
-                        <div class="stat-item"><span class="label">Snowfall</span><span class="val">${h.snowfall[now]}"</span></div>
-                    </div>
-                    <canvas id="chart-${r.name.replace(/\s/g,'')}"></canvas>
-                `;
-                grid.appendChild(card);
+                    const cloudVal = h.cloud_cover[now];
+                    const isFlatLight = visInMiles < 3.5 || cloudVal > 85;
+                    const isPowder = h.snowfall[now] > 0.1;
 
-                new Chart(document.getElementById(`chart-${r.name.replace(/\s/g,'')}`), {
-                    type: 'line',
-                    data: {
-                        labels: h.time.slice(now, now + 12).map(t => t.split('T')[1]),
-                        datasets: [{
-                            label: 'Wind Gusts (mph)',
-                            data: h.wind_gusts_10m.slice(now, now + 12),
-                            borderColor: '#0ea5e9',
-                            backgroundColor: 'rgba(14, 165, 233, 0.2)',
-                            fill: true,
-                            tension: 0.3
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            y: { 
-                                beginAtZero: true, 
-                                title: { display: true, text: 'MPH', color: '#94a3b8', font: { size: 10 } },
-                                grid: { color: '#334155' },
-                                ticks: { color: '#94a3b8' }
-                            },
-                            x: { ticks: { color: '#94a3b8', font: { size: 9 } } }
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.innerHTML = `
+                        <div class="header">
+                            <span class="resort-name">${r.name}</span>
+                            <div style="display:flex; gap:8px;">
+                                ${isPowder ? '<span class="badge badge-powder">Fresh Snow</span>' : ''}
+                                ${isFlatLight ? '<span class="badge badge-warning">Flat Light</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="stats-grid">
+                            <div class="stat-item"><span class="label">Temp</span><span class="val">${Math.round(h.temperature_2m[now])}°F</span></div>
+                            <div class="stat-item"><span class="label">Wind</span><span class="val">${Math.round(h.wind_speed_10m[now])} mph</span></div>
+                            <div class="stat-item"><span class="label">Visibility</span><span class="val">${visDisplay} mi</span></div>
+                            <div class="stat-item"><span class="label">Clouds</span><span class="val">${cloudVal}%</span></div>
+                            <div class="stat-item"><span class="label">Snow</span><span class="val">${h.snowfall[now]}"</span></div>
+                            <div class="stat-item"><span class="label">Humidity</span><span class="val">${h.relative_humidity_2m[now]}%</span></div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="chart-${r.name.replace(/\s/g,'')}"></canvas>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+
+                    new Chart(document.getElementById(`chart-${r.name.replace(/\s/g,'')}`), {
+                        type: 'line',
+                        data: {
+                            labels: h.time.slice(now, now + 12).map(t => t.split('T')[1]),
+                            datasets: [{
+                                label: '12h Wind Gust Trend (MPH)',
+                                data: h.wind_gusts_10m.slice(now, now + 12),
+                                borderColor: '#0ea5e9',
+                                backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                                fill: true,
+                                tension: 0.4,
+                                pointBackgroundColor: '#0ea5e9'
+                            }]
                         },
-                        plugins: {
-                            legend: { display: true, labels: { color: '#f8fafc', boxWidth: 10, font: { size: 10 } } }
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: { 
+                                    beginAtZero: true, 
+                                    grid: { color: '#334155' }, 
+                                    ticks: { color: '#94a3b8' },
+                                    title: { display: true, text: 'MPH', color: '#94a3b8' }
+                                },
+                                x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                            },
+                            plugins: {
+                                legend: { display: true, labels: { color: '#f8fafc', font: { weight: 'bold' } } },
+                                tooltip: { backgroundColor: '#1e293b', titleColor: '#0ea5e9' }
+                            }
                         }
-                    }
-                });
+                    });
+                } catch (err) {
+                    console.error("Error loading resort data:", err);
+                }
             }
         }
-        init();
+
+        updateView();
     </script>
 </body>
 </html>
